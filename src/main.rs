@@ -1,4 +1,7 @@
-use std::{collections::HashMap, fs};
+use std::{
+    collections::{HashMap, HashSet},
+    fs,
+};
 #[derive(Debug, PartialEq, Eq, Hash, Clone)]
 struct Piece(u32, u32);
 impl Piece {
@@ -20,7 +23,7 @@ impl TryFrom<Vec<&str>> for Piece {
     }
 }
 type PiecesMap = HashMap<Piece, u32>;
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq, Hash)]
 struct Cheese {
     //a<=b<=c
     size: [u32; 3],
@@ -44,11 +47,17 @@ impl Cheese {
         // println!("size: {:?}", size);
         Cheese { size }
     }
-    pub fn gen_poss_paths(&self, pieces: &PiecesMap) -> Vec<(Cheese, PiecesMap)> {
+    pub fn gen_poss_paths(
+        &self,
+        pieces: &PiecesMap,
+        curr_path: &Vec<usize>,
+    ) -> Vec<(Cheese, PiecesMap, Vec<usize>)> {
         let mut paths = vec![];
         for (i, side) in self.get_sides().iter().enumerate() {
             if let Some(_) = pieces.get(&side) {
                 let mut new_map = pieces.clone();
+                let mut new_path = curr_path.clone();
+                new_path.push(i);
                 let n = {
                     let n = new_map.get_mut(&side).unwrap();
                     *n -= 1;
@@ -58,10 +67,13 @@ impl Cheese {
                 if n == 0 {
                     new_map.remove(&side);
                     if new_map.len() == 0 {
-                        println!("found solution, cheese: {:#?}", new_cheese);
+                        println!(
+                            "found solution, cheese: {:#?}, path: {:?}",
+                            new_cheese, new_path
+                        );
                     }
                 }
-                paths.push((new_cheese, new_map));
+                paths.push((new_cheese, new_map, new_path));
             }
         }
         paths
@@ -87,11 +99,16 @@ fn gen_pieces_map(pieces: Vec<Piece>) -> PiecesMap {
             pieces_map.insert(piece, 1);
         }
     }
-    println!("read {} pieces from file\nmax number of one piece: {}, n_multiple: {}, number of different pieces: {}", pieces_map.len(), max_n, n_multiple, pieces_map.len());
+    println!(
+        "max number of one piece: {}, n_multiple: {}, number of different pieces: {}",
+        max_n,
+        n_multiple,
+        pieces_map.len()
+    );
     pieces_map
 }
 fn main() {
-    let s = fs::read_to_string("data/kaese4.txt").expect("couldn't read file");
+    let s = fs::read_to_string("data/kaese6.txt").expect("couldn't read file");
     let mut lines = s.split("\r\n");
     let n_pieces: usize = lines
         .next()
@@ -113,22 +130,30 @@ fn main() {
         })
         .collect();
     assert_eq!(n_pieces, pieces.len());
+    println!("read {} pieces from the file", n_pieces);
     let pieces_map = gen_pieces_map(pieces);
     //find possible start pieces_map
     let mut poss_paths = vec![];
     for (piece, _) in pieces_map.iter() {
         let cheese = Cheese::new([piece.0, piece.1, 0]);
         println!("new possible cheese: {:?}", cheese);
-        poss_paths.extend(cheese.gen_poss_paths(&pieces_map));
+        poss_paths.extend(cheese.gen_poss_paths(&pieces_map, &vec![]));
     }
+    let mut i = 0;
     while !poss_paths.is_empty() {
-        println!("a");
+        println!("a, {} {}/{}", poss_paths.len(), i, n_pieces);
         let mut new_paths = vec![];
-        for (cheese, pieces) in poss_paths.iter() {
-            let paths = cheese.gen_poss_paths(&pieces);
+        let mut other_cheees = HashSet::new();
+        for (cheese, pieces, path) in poss_paths.iter() {
+            if other_cheees.get(cheese).is_some() {
+                continue;
+            }
+            other_cheees.insert(cheese);
+            let paths = cheese.gen_poss_paths(&pieces, path);
             new_paths.extend(paths);
         }
         poss_paths = new_paths;
+        i += 1;
     }
     //println!("Hello, world! pieces: {:#?}", pieces);
 }
