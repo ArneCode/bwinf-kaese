@@ -1,14 +1,6 @@
-use std::{
-    collections::{HashMap, HashSet},
-    fs,
-};
+use std::{collections::HashMap, fs, hash::Hash, rc::Rc, time::Instant};
 #[derive(Debug, PartialEq, Eq, Hash, Clone)]
 struct Piece(u32, u32);
-impl Piece {
-    pub fn rotated(&self) -> Self {
-        Piece(self.1, self.0)
-    }
-}
 impl TryFrom<Vec<&str>> for Piece {
     type Error = std::num::ParseIntError;
     fn try_from(value: Vec<&str>) -> Result<Self, Self::Error> {
@@ -22,8 +14,40 @@ impl TryFrom<Vec<&str>> for Piece {
         }
     }
 }
-type PiecesMap = HashMap<Piece, u32>;
-#[derive(Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug)]
+struct PiecesMap<K, V>
+where
+    K: Hash + Eq,
+{
+    base: Rc<HashMap<K, V>>,
+    added: HashMap<K, V>,
+}
+impl<K, V> PiecesMap<K, V>
+where
+    K: Hash + Eq,
+{
+    fn new(map: HashMap<K, V>) -> Self {
+        Self {
+            base: Rc::new(map),
+            added: HashMap::new(),
+        }
+    }
+    fn get(&self, k: &K) -> Option<&V> {
+        if let Some(result) = self.added.get(k) {
+            Some(result)
+        } else if let Some(result) = self.base.get(k) {
+            Some(result)
+        } else {
+            None
+        }
+    }
+
+    fn insert(&mut self, k: K, v: V) -> Option<V> {
+        self.added.insert(k, v)
+    }
+}
+
+#[derive(Debug, PartialEq, Eq, Hash, Clone, Copy)]
 struct Cheese {
     //a<=b<=c
     size: [u32; 3],
@@ -49,33 +73,62 @@ impl Cheese {
     }
     pub fn gen_poss_paths(
         &self,
-        pieces: &PiecesMap,
-        curr_path: &Vec<usize>,
-    ) -> Vec<(Cheese, PiecesMap, Vec<usize>)> {
-        let mut paths = vec![];
-        for (i, side) in self.get_sides().iter().enumerate() {
-            if let Some(_) = pieces.get(&side) {
-                let mut new_map = pieces.clone();
-                let mut new_path = curr_path.clone();
-                new_path.push(i);
-                let n = {
-                    let n = new_map.get_mut(&side).unwrap();
-                    *n -= 1;
-                    *n
-                };
-                let new_cheese = self.expand_side(i);
-                if n == 0 {
-                    new_map.remove(&side);
-                    if new_map.len() == 0 {
-                        println!(
-                            "found solution, cheese: {:#?}, path: {:?}",
-                            new_cheese, new_path
-                        );
-                    }
+        pieces: Box<PiecesMap<Piece, u32>>,
+    ) -> Vec<(Cheese, Box<PiecesMap<Piece, u32>>)> {
+        let paths = self
+            .get_sides()
+            .into_iter()
+            .enumerate()
+            .filter_map(|(i, side)| {
+                let n_pieces = pieces.get(&side)?;
+                if n_pieces == &0 {
+                    return None;
                 }
-                paths.push((new_cheese, new_map, new_path));
-            }
-        }
+                Some((i, side, n_pieces - 1))
+            })
+            .collect::<Vec<_>>();
+        let paths = if paths.len() > 0 {
+            let pieces_ptr = Box::into_raw(pieces);
+            paths
+                .iter()
+                .enumerate()
+                .rev()
+                .map(move |(i, (side_n, side, n_pieces))| {
+                    let mut pieces = if i == 0 {
+                        //if this is the last copy that will be used of the pieces, use as is
+                        unsafe { Box::from_raw(pieces_ptr) }
+                    } else {
+                        //else copy
+                        Box::new(unsafe { pieces_ptr.as_ref() }.unwrap().clone())
+                    };
+                    pieces.insert(side.clone(), *n_pieces);
+                    // let mut new_path = curr_path.clone();
+
+                    // new_path.push(*side_n);
+                    let new_cheese = self.expand_side(*side_n);
+                    (new_cheese, pieces)
+                })
+                .collect()
+        } else {
+            vec![]
+        };
+        // for (i, side) in self.get_sides().iter().enumerate() {
+        //     if let Some(n) = pieces.get_ref().get(&side) {
+        //         if n <= &0 {
+        //             continue;
+        //         }
+
+        //         let n = n - 1;
+        //         let mut new_map = unsafe { pieces.get_copy() };
+        //         new_map.insert(side.clone(), n - 1);
+
+        //         let mut new_path = curr_path.clone();
+        //         new_path.push(i);
+        //         let new_cheese = self.expand_side(i);
+
+        //         paths.push((new_cheese, new_map, new_path));
+        //     }
+        // }
         paths
     }
 }
@@ -84,7 +137,7 @@ impl From<Piece> for Cheese {
         Cheese::new([value.0, value.1, 1])
     }
 }
-fn gen_pieces_map(pieces: Vec<Piece>) -> PiecesMap {
+fn gen_pieces_map(pieces: Vec<Piece>) -> PiecesMap<Piece, u32> {
     let mut pieces_map: HashMap<Piece, u32> = HashMap::new();
     let mut max_n = 0;
     let mut n_multiple = 0;
@@ -105,7 +158,7 @@ fn gen_pieces_map(pieces: Vec<Piece>) -> PiecesMap {
         n_multiple,
         pieces_map.len()
     );
-    pieces_map
+    PiecesMap::new(pieces_map)
 }
 fn main() {
     let s = fs::read_to_string("data/kaese6.txt").expect("couldn't read file");
@@ -131,29 +184,58 @@ fn main() {
         .collect();
     assert_eq!(n_pieces, pieces.len());
     println!("read {} pieces from the file", n_pieces);
-    let pieces_map = gen_pieces_map(pieces);
+    let start = Instant::now();
+    let pieces_map = Box::new(gen_pieces_map(pieces));
     //find possible start pieces_map
     let mut poss_paths = vec![];
-    for (piece, _) in pieces_map.iter() {
+    for (piece, _) in pieces_map.base.iter() {
         let cheese = Cheese::new([piece.0, piece.1, 0]);
-        println!("new possible cheese: {:?}", cheese);
-        poss_paths.extend(cheese.gen_poss_paths(&pieces_map, &vec![]));
+        // println!("new possible cheese: {:?}", cheese);
+        // poss_paths.extend(cheese.gen_poss_paths(pieces_map, &vec![]));
+        poss_paths.push((cheese, pieces_map.clone()));
     }
     let mut i = 0;
-    while !poss_paths.is_empty() {
-        println!("a, {} {}/{}", poss_paths.len(), i, n_pieces);
+    while i < n_pieces {
+        let paths_len = poss_paths.len();
+        if i % 10000 == 0 || poss_paths.len() > 1 {
+            // println!("a, {} {}/{}", poss_paths.len(), i, n_pieces);
+        }
         let mut new_paths = vec![];
-        let mut other_cheees = HashSet::new();
-        for (cheese, pieces, path) in poss_paths.iter() {
-            if other_cheees.get(cheese).is_some() {
-                continue;
+        for (cheese, pieces) in poss_paths.into_iter() {
+            if paths_len < 3 {
+                // println!("{:?}", path);
             }
-            other_cheees.insert(cheese);
-            let paths = cheese.gen_poss_paths(&pieces, path);
+            let paths = cheese.gen_poss_paths(pieces);
             new_paths.extend(paths);
         }
         poss_paths = new_paths;
+        let mut other_cheeses: HashMap<&Cheese, &Box<PiecesMap<Piece, u32>>> = HashMap::new();
+        let paths_filter = poss_paths
+            .iter()
+            .map(|(cheese, pieces)| {
+                if let Some(other_pieces) = other_cheeses.get(&cheese) {
+                    other_pieces.added != pieces.added
+                } else {
+                    other_cheeses.insert(cheese, pieces);
+                    true
+                }
+            })
+            .collect::<Vec<_>>();
+        poss_paths = poss_paths
+            .into_iter()
+            .zip(paths_filter)
+            .filter(|(_, v)| *v)
+            .map(|(v, _)| v)
+            .collect();
         i += 1;
     }
+    if poss_paths.is_empty() {
+        println!("found no solution");
+    }
+    for (cheese, _) in poss_paths {
+        println!("found solution: {:#?}", cheese);
+    }
+    let elapsed = start.elapsed();
+    println!("took: {:?}", elapsed);
     //println!("Hello, world! pieces: {:#?}", pieces);
 }
