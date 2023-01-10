@@ -1,4 +1,11 @@
-use std::{collections::HashMap, fs, hash::Hash, rc::Rc, time::Instant};
+use rustc_hash::{FxHashMap, FxHasher};
+use std::{
+    fs,
+    hash::{BuildHasherDefault, Hash},
+    rc::Rc,
+    time::Instant,
+};
+use uuid::Uuid;
 #[derive(Debug, PartialEq, Eq, Hash, Clone)]
 struct Piece(u32, u32);
 impl TryFrom<Vec<&str>> for Piece {
@@ -14,22 +21,26 @@ impl TryFrom<Vec<&str>> for Piece {
         }
     }
 }
-#[derive(Clone, Debug)]
+#[derive(Debug, Clone)]
 struct PiecesMap<K, V>
 where
     K: Hash + Eq,
 {
-    base: Rc<HashMap<K, V>>,
-    added: HashMap<K, V>,
+    base: Rc<FxHashMap<K, V>>,
+    base_id: Uuid,
+    added: FxHashMap<K, V>,
 }
+
 impl<K, V> PiecesMap<K, V>
 where
     K: Hash + Eq,
 {
-    fn new(map: HashMap<K, V>) -> Self {
+    fn new(map: FxHashMap<K, V>) -> Self {
+        let base_id = Uuid::new_v4();
         Self {
             base: Rc::new(map),
-            added: HashMap::new(),
+            base_id,
+            added: FxHashMap::default(),
         }
     }
     fn get(&self, k: &K) -> Option<&V> {
@@ -44,6 +55,36 @@ where
 
     fn insert(&mut self, k: K, v: V) -> Option<V> {
         self.added.insert(k, v)
+    }
+
+    fn make_copy(&mut self) -> Self
+    where
+        K: Clone,
+        V: Clone,
+    {
+        if self.added.len() < self.base.len() / 40 {
+            Self {
+                base: self.base.clone(),
+                base_id: self.base_id,
+                added: self.added.clone(),
+            }
+        } else {
+            let mut base = FxHashMap::with_capacity_and_hasher(
+                self.base.len(),
+                BuildHasherDefault::<FxHasher>::default(),
+            );
+            for (k, v) in self.base.as_ref() {
+                let v = if let Some(v) = self.added.get(k) {
+                    v.clone()
+                } else {
+                    v.clone()
+                };
+                base.insert(k.clone(), v);
+            }
+            self.base = Rc::new(base);
+            self.added = FxHashMap::default();
+            self.clone()
+        }
     }
 }
 
@@ -65,7 +106,7 @@ impl Cheese {
         ]
     }
     fn expand_side(&self, n: usize) -> Cheese {
-        let mut size = self.size.clone();
+        let mut size = self.size;
         size[n] += 1;
         size.sort_unstable_by_key(|size| std::cmp::Reverse(*size));
         // println!("size: {:?}", size);
@@ -87,7 +128,7 @@ impl Cheese {
                 Some((i, side, n_pieces - 1))
             })
             .collect::<Vec<_>>();
-        let paths = if paths.len() > 0 {
+        let paths = if !paths.is_empty() {
             let pieces_ptr = Box::into_raw(pieces);
             paths
                 .iter()
@@ -99,7 +140,7 @@ impl Cheese {
                         unsafe { Box::from_raw(pieces_ptr) }
                     } else {
                         //else copy
-                        Box::new(unsafe { pieces_ptr.as_ref() }.unwrap().clone())
+                        Box::new(unsafe { pieces_ptr.as_mut() }.unwrap().make_copy())
                     };
                     pieces.insert(side.clone(), *n_pieces);
                     // let mut new_path = curr_path.clone();
@@ -138,7 +179,7 @@ impl From<Piece> for Cheese {
     }
 }
 fn gen_pieces_map(pieces: Vec<Piece>) -> PiecesMap<Piece, u32> {
-    let mut pieces_map: HashMap<Piece, u32> = HashMap::new();
+    let mut pieces_map: FxHashMap<Piece, u32> = FxHashMap::default();
     let mut max_n = 0;
     let mut n_multiple = 0;
     for piece in pieces {
@@ -161,7 +202,7 @@ fn gen_pieces_map(pieces: Vec<Piece>) -> PiecesMap<Piece, u32> {
     PiecesMap::new(pieces_map)
 }
 fn main() {
-    let s = fs::read_to_string("data/kaese6.txt").expect("couldn't read file");
+    let s = fs::read_to_string("data/kaese7.txt").expect("couldn't read file");
     let mut lines = s.split("\r\n");
     let n_pieces: usize = lines
         .next()
@@ -174,7 +215,7 @@ fn main() {
                 None
             } else {
                 Some(
-                    line.split(" ")
+                    line.split(' ')
                         .collect::<Vec<&str>>()
                         .try_into()
                         .expect("couldn't parse line"),
@@ -198,7 +239,7 @@ fn main() {
     while i < n_pieces {
         let paths_len = poss_paths.len();
         if i % 10000 == 0 || poss_paths.len() > 1 {
-            // println!("a, {} {}/{}", poss_paths.len(), i, n_pieces);
+            println!("a, {} {}/{}", poss_paths.len(), i, n_pieces);
         }
         let mut new_paths = vec![];
         for (cheese, pieces) in poss_paths.into_iter() {
@@ -209,12 +250,24 @@ fn main() {
             new_paths.extend(paths);
         }
         poss_paths = new_paths;
-        let mut other_cheeses: HashMap<&Cheese, &Box<PiecesMap<Piece, u32>>> = HashMap::new();
+        let mut other_cheeses: FxHashMap<&Cheese, &Box<PiecesMap<Piece, u32>>> =
+            FxHashMap::default();
         let paths_filter = poss_paths
             .iter()
             .map(|(cheese, pieces)| {
                 if let Some(other_pieces) = other_cheeses.get(&cheese) {
-                    other_pieces.added != pieces.added
+                    let keys = if pieces.base_id == other_pieces.base_id {
+                        pieces.added.keys()
+                    } else {
+                        pieces.base.keys()
+                    };
+                    for piece in keys {
+                        if pieces.get(piece) != other_pieces.get(piece) {
+                            return true;
+                        }
+                    }
+                    false
+                    //other_pieces.added != pieces.added && other_pieces.base != pieces.base
                 } else {
                     other_cheeses.insert(cheese, pieces);
                     true
