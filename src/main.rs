@@ -1,5 +1,6 @@
 use rustc_hash::{FxHashMap, FxHasher};
 use std::{
+    env::args,
     fs,
     hash::{BuildHasherDefault, Hash},
     rc::Rc,
@@ -22,20 +23,14 @@ impl TryFrom<Vec<&str>> for Piece {
     }
 }
 #[derive(Debug, Clone)]
-struct PiecesMap<K, V>
-where
-    K: Hash + Eq,
-{
-    base: Rc<FxHashMap<K, V>>,
+struct PiecesMap {
+    base: Rc<FxHashMap<Piece, u32>>,
     base_id: Uuid,
-    added: FxHashMap<K, V>,
+    added: FxHashMap<Piece, u32>,
 }
 
-impl<K, V> PiecesMap<K, V>
-where
-    K: Hash + Eq,
-{
-    fn new(map: FxHashMap<K, V>) -> Self {
+impl PiecesMap {
+    fn new(map: FxHashMap<Piece, u32>) -> Self {
         let base_id = Uuid::new_v4();
         Self {
             base: Rc::new(map),
@@ -43,7 +38,7 @@ where
             added: FxHashMap::default(),
         }
     }
-    fn get(&self, k: &K) -> Option<&V> {
+    fn get(&self, k: &Piece) -> Option<&u32> {
         if let Some(result) = self.added.get(k) {
             Some(result)
         } else if let Some(result) = self.base.get(k) {
@@ -53,15 +48,11 @@ where
         }
     }
 
-    fn insert(&mut self, k: K, v: V) -> Option<V> {
+    fn insert(&mut self, k: Piece, v: u32) -> Option<u32> {
         self.added.insert(k, v)
     }
 
-    fn make_copy(&mut self) -> Self
-    where
-        K: Clone,
-        V: Clone,
-    {
+    fn make_copy(&mut self) -> Self {
         if self.added.len() < self.base.len() / 40 {
             Self {
                 base: self.base.clone(),
@@ -69,6 +60,7 @@ where
                 added: self.added.clone(),
             }
         } else {
+            println!("merging");
             let mut base = FxHashMap::with_capacity_and_hasher(
                 self.base.len(),
                 BuildHasherDefault::<FxHasher>::default(),
@@ -79,12 +71,48 @@ where
                 } else {
                     v.clone()
                 };
+                if v == 0 {
+                    continue;
+                }
                 base.insert(k.clone(), v);
             }
             self.base = Rc::new(base);
             self.added = FxHashMap::default();
             self.clone()
         }
+    }
+}
+#[derive(Debug)]
+struct Path {
+    prev: Option<Rc<Path>>,
+    value: Piece,
+    is_added: bool,
+}
+
+impl Path {
+    fn new(value: Piece) -> Self {
+        Self {
+            prev: None,
+            value,
+            is_added: false,
+        }
+    }
+    fn make_next(self: &Rc<Self>, value: Piece, is_added: bool) -> Rc<Self> {
+        Rc::new(Self {
+            prev: Some(self.clone()),
+            value,
+            is_added,
+        })
+    }
+    fn to_array(self: &Rc<Path>) -> Vec<Rc<Path>> {
+        let mut nodes = vec![];
+        let mut node = self.clone();
+        nodes.push(node.clone());
+        while let Some(prev) = &node.prev {
+            node = prev.clone();
+            nodes.push(node.clone());
+        }
+        nodes
     }
 }
 
@@ -114,8 +142,9 @@ impl Cheese {
     }
     pub fn gen_poss_paths(
         &self,
-        pieces: Box<PiecesMap<Piece, u32>>,
-    ) -> Vec<(Cheese, Box<PiecesMap<Piece, u32>>)> {
+        path: Rc<Path>,
+        pieces: Box<PiecesMap>,
+    ) -> Vec<(Cheese, Rc<Path>, Box<PiecesMap>)> {
         let paths = self
             .get_sides()
             .into_iter()
@@ -143,33 +172,14 @@ impl Cheese {
                         Box::new(unsafe { pieces_ptr.as_mut() }.unwrap().make_copy())
                     };
                     pieces.insert(side.clone(), *n_pieces);
-                    // let mut new_path = curr_path.clone();
-
-                    // new_path.push(*side_n);
+                    let new_path = path.make_next(side.clone(), false);
                     let new_cheese = self.expand_side(*side_n);
-                    (new_cheese, pieces)
+                    (new_cheese, new_path, pieces)
                 })
                 .collect()
         } else {
             vec![]
         };
-        // for (i, side) in self.get_sides().iter().enumerate() {
-        //     if let Some(n) = pieces.get_ref().get(&side) {
-        //         if n <= &0 {
-        //             continue;
-        //         }
-
-        //         let n = n - 1;
-        //         let mut new_map = unsafe { pieces.get_copy() };
-        //         new_map.insert(side.clone(), n - 1);
-
-        //         let mut new_path = curr_path.clone();
-        //         new_path.push(i);
-        //         let new_cheese = self.expand_side(i);
-
-        //         paths.push((new_cheese, new_map, new_path));
-        //     }
-        // }
         paths
     }
 }
@@ -178,7 +188,7 @@ impl From<Piece> for Cheese {
         Cheese::new([value.0, value.1, 1])
     }
 }
-fn gen_pieces_map(pieces: Vec<Piece>) -> PiecesMap<Piece, u32> {
+fn gen_pieces_map(pieces: Vec<Piece>) -> PiecesMap {
     let mut pieces_map: FxHashMap<Piece, u32> = FxHashMap::default();
     let mut max_n = 0;
     let mut n_multiple = 0;
@@ -202,7 +212,8 @@ fn gen_pieces_map(pieces: Vec<Piece>) -> PiecesMap<Piece, u32> {
     PiecesMap::new(pieces_map)
 }
 fn main() {
-    let s = fs::read_to_string("data/kaese7.txt").expect("couldn't read file");
+    let args: Vec<String> = args().collect();
+    let s = fs::read_to_string(&args[1]).expect("couldn't read file");
     let mut lines = s.split("\r\n");
     let n_pieces: usize = lines
         .next()
@@ -229,12 +240,17 @@ fn main() {
     let pieces_map = Box::new(gen_pieces_map(pieces));
     //find possible start pieces_map
     let mut poss_paths = vec![];
-    for (piece, _) in pieces_map.base.iter() {
+    for piece in pieces_map.base.keys() {
         let cheese = Cheese::new([piece.0, piece.1, 0]);
         // println!("new possible cheese: {:?}", cheese);
         // poss_paths.extend(cheese.gen_poss_paths(pieces_map, &vec![]));
-        poss_paths.push((cheese, pieces_map.clone()));
+        poss_paths.push((
+            cheese,
+            Rc::new(Path::new(piece.clone())),
+            pieces_map.clone(),
+        ));
     }
+    let mut n_checks = 0;
     let mut i = 0;
     while i < n_pieces {
         let paths_len = poss_paths.len();
@@ -242,23 +258,23 @@ fn main() {
             println!("a, {} {}/{}", poss_paths.len(), i, n_pieces);
         }
         let mut new_paths = vec![];
-        for (cheese, pieces) in poss_paths.into_iter() {
+        for (cheese, path, pieces) in poss_paths.into_iter() {
             if paths_len < 3 {
                 // println!("{:?}", path);
             }
-            let paths = cheese.gen_poss_paths(pieces);
+            let paths = cheese.gen_poss_paths(path, pieces);
             new_paths.extend(paths);
         }
         poss_paths = new_paths;
-        let mut other_cheeses: FxHashMap<&Cheese, &Box<PiecesMap<Piece, u32>>> =
-            FxHashMap::default();
+        let mut other_cheeses: FxHashMap<&Cheese, &Box<PiecesMap>> = FxHashMap::default();
         let paths_filter = poss_paths
             .iter()
-            .map(|(cheese, pieces)| {
+            .map(|(cheese, _, pieces)| {
                 if let Some(other_pieces) = other_cheeses.get(&cheese) {
                     let keys = if pieces.base_id == other_pieces.base_id {
                         pieces.added.keys()
                     } else {
+                        n_checks += 1;
                         pieces.base.keys()
                     };
                     for piece in keys {
@@ -285,9 +301,13 @@ fn main() {
     if poss_paths.is_empty() {
         println!("found no solution");
     }
-    for (cheese, _) in poss_paths {
+    println!("len: {}", poss_paths.len());
+    for (cheese, path, _) in poss_paths {
         println!("found solution: {:#?}", cheese);
+        let path = path.to_array().into_iter().rev().collect::<Vec<_>>();
+        println!("first piece: {:?}", path[0].value);
     }
+    println!("test");
     let elapsed = start.elapsed();
     println!("took: {:?}", elapsed);
     //println!("Hello, world! pieces: {:#?}", pieces);
