@@ -77,7 +77,7 @@ impl PiecesMap {
         self.added = FxHashMap::default();
     }
     fn make_copy(&mut self) -> Self {
-        if self.added.len() > self.base.len() / 60 {
+        if self.added.len() > self.base.len() / 10 {
             self.merge();
         }
         self.clone()
@@ -221,10 +221,19 @@ impl Cheese {
         pieces: Box<PiecesMap>,
     ) -> Vec<(Cheese, Path, Box<PiecesMap>)> {
         let mut sides_added = vec![];
+        let mut sides_seen = vec![];
         let paths = self
             .get_sides()
             .into_iter()
             .enumerate()
+            .filter(|(_, side)| {
+                if sides_seen.iter().any(|other| other == side) {
+                    false
+                } else {
+                    sides_seen.push(side.clone());
+                    true
+                }
+            })
             .filter_map(|(i, side)| {
                 let n_pieces = pieces.get(&side)?;
                 if n_pieces == &0 {
@@ -328,11 +337,11 @@ fn gen_path_starts(pieces_map: &Box<PiecesMap>) -> Vec<PossPath> {
     poss_paths
 }
 fn filter_multiple_paths(poss_paths: Vec<PossPath>) -> Vec<PossPath> {
-    let mut other_cheeses: FxHashMap<&Cheese, &Box<PiecesMap>> = FxHashMap::default();
+    let mut other_cheeses: FxHashMap<&Cheese, (&Box<PiecesMap>, Path)> = FxHashMap::default();
     let paths_filter = poss_paths
         .iter()
-        .map(|(cheese, _, pieces)| {
-            if let Some(other_pieces) = other_cheeses.get(&cheese) {
+        .map(|(cheese, path, pieces)| {
+            if let Some((other_pieces, other_path)) = other_cheeses.get(&cheese) {
                 let keys = if pieces.base_id == other_pieces.base_id {
                     pieces.added.keys()
                 } else {
@@ -344,10 +353,21 @@ fn filter_multiple_paths(poss_paths: Vec<PossPath>) -> Vec<PossPath> {
                         return true;
                     }
                 }
+                println!("merge");
+                // let arr = path.curr.get_pieces().into_iter().rev().collect::<Vec<_>>();
+                // let other_arr = other_path
+                //     .curr
+                //     .get_pieces()
+                //     .into_iter()
+                //     .rev()
+                //     .collect::<Vec<_>>();
+                // println!("cheese: {:?}", cheese);
+                // println!("merged {}:\n\t{:?}", arr.len(), arr);
+                // println!("other:\n\t{:?}", other_arr);
                 false
                 //other_pieces.added != pieces.added && other_pieces.base != pieces.base
             } else {
-                other_cheeses.insert(cheese, pieces);
+                other_cheeses.insert(cheese, (pieces, path.clone()));
                 true
             }
         })
@@ -376,6 +396,9 @@ fn construct_cheese(start: PossPath, min_path_len: usize) -> Option<(Cheese, Pat
         };
         for (cheese, path, pieces) in poss_paths.into_iter() {
             let paths = cheese.gen_poss_paths(path, pieces);
+            // if paths.len() > 1 {
+            //     println!("split at len: {}", path.len);
+            // }
             new_paths.extend(paths);
         }
         if new_paths.is_empty() {
@@ -385,7 +408,8 @@ fn construct_cheese(start: PossPath, min_path_len: usize) -> Option<(Cheese, Pat
                 None
             };
         }
-        poss_paths = filter_multiple_paths(new_paths);
+        // poss_paths = filter_multiple_paths(new_paths);
+        poss_paths = new_paths;
         i += 1;
     }
 }
@@ -453,9 +477,10 @@ fn main() {
     }
     for (cheese, path) in &result {
         println!("found solution: {:#?}", cheese);
-        let path = path.curr.to_array().into_iter().rev().collect::<Vec<_>>();
-        println!("first piece: {:?}", path[0].value);
-        println!("last piece: {:?}", path.last().unwrap().value);
+        let path = path.curr.get_pieces().into_iter().rev().collect::<Vec<_>>();
+        println!("first piece: {:?}", path[0]);
+        println!("last piece: {:?}", path.last().unwrap());
+        // println!("path: {:?}", path);
     }
     let elapsed = start.elapsed();
     println!("took: {:?}", elapsed);
