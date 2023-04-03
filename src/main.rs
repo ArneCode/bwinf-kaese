@@ -200,7 +200,9 @@ impl Cheese {
     fn new(size: [u32; 3]) -> Self {
         Self { size }
     }
-
+    pub fn get_sides_n() -> Vec<(usize, usize)> {
+        vec![(1, 2), (0, 2), (0, 1)]
+    }
     pub fn get_sides(&self) -> Vec<Piece> {
         vec![
             Piece(self.size[1], self.size[2]),
@@ -220,13 +222,16 @@ impl Cheese {
         path: Path,
         pieces: Box<PiecesMap>,
     ) -> Vec<(Cheese, Path, Box<PiecesMap>)> {
-        let mut sides_added = vec![];
+        //<<<<<<< Updated upstream
+        // let mut sides_added = vec![];
         let mut sides_seen = vec![];
-        let paths = self
+        let mut updated_sides = vec![false; 3];
+        let mut paths = self
             .get_sides()
             .into_iter()
             .enumerate()
             .filter(|(_, side)| {
+                //check if two sides of the cheese are equal
                 if sides_seen.iter().any(|other| other == side) {
                     false
                 } else {
@@ -235,22 +240,59 @@ impl Cheese {
                 }
             })
             .filter_map(|(i, side)| {
+                /*=======
+                        let mut paths = self
+                            .get_sides()
+                            .into_iter()
+                            .enumerate()
+                            .flat_map(|(i, side)| {
+                //>>>>>>> Stashed changes*/
                 let n_pieces = pieces.get(&side)?;
                 if n_pieces == &0 {
-                    sides_added.push(false);
                     return None;
                 }
-                sides_added.push(true);
-                Some((i, side, n_pieces - 1))
+                updated_sides[i] = true;
+                Some((i, side, n_pieces - 1, None::<Piece>))
             })
             .collect::<Vec<_>>();
+        // /*
+        // check for possible missing pieces
+        paths.extend(
+            Cheese::get_sides_n()
+                .into_iter()
+                .enumerate()
+                .flat_map(|(i, (a, b))| {
+                    if updated_sides[a] && updated_sides[b] {
+                        return vec![];
+                    }
+                    let x = self.size[a];
+                    let y = self.size[b];
+                    let z = self.size[i];
+                    let mut sides = vec![];
+                    if !updated_sides[a] {
+                        sides.push((i, Piece(y, z), Piece(x + 1, y)))
+                    }
+                    if !updated_sides[b] {
+                        sides.push((i, Piece(x, z), Piece(x, y + 1)))
+                    }
+                    sides
+                })
+                .filter_map(|(i, added, new)| {
+                    let n_pieces = pieces.get(&new)?;
+                    if n_pieces == &0 {
+                        return None;
+                    }
+                    // println!("found piece: {:?}, n_pieces: {}", new, n_pieces);
+                    Some((i, new, n_pieces - 1, Some(added)))
+                }),
+        ); //*/
         let paths = if !paths.is_empty() {
             let pieces_ptr = Box::into_raw(pieces);
             paths
-                .iter()
+                .into_iter()
                 .enumerate()
                 .rev()
-                .map(move |(i, (side_n, side, n_pieces))| {
+                .map(move |(i, (side_n, side, n_pieces, added_side))| {
                     let mut pieces = if i == 0 {
                         //if this is the last copy that will be used of the pieces, use as is
                         unsafe { Box::from_raw(pieces_ptr) }
@@ -258,9 +300,15 @@ impl Cheese {
                         //else copy
                         Box::new(unsafe { pieces_ptr.as_mut() }.unwrap().make_copy())
                     };
-                    pieces.insert(side.clone(), *n_pieces);
-                    let new_path = path.extend(side.clone(), false);
-                    let new_cheese = self.expand_side(*side_n);
+                    pieces.insert(side.clone(), n_pieces);
+                    let new_path = if let Some(added) = added_side {
+                        path.extend(added.clone(), true)
+                    } else {
+                        path.clone()
+                    };
+                    let new_path = new_path.extend(side.clone(), false);
+
+                    let new_cheese = self.expand_side(side_n);
                     (new_cheese, new_path, pieces)
                 })
                 .collect()
@@ -432,7 +480,8 @@ fn construct_cheeses(pieces: Box<PiecesMap>, n_pieces: usize) -> Vec<(Cheese, Pa
             let result = construct_cheese(start, min_path_len);
             if let Some((cheese, path)) = result {
                 let new_used_pieces = path.curr.get_pieces();
-                println!("found cheese, len: {}", new_used_pieces.len());
+                println!("found cheese: {:?}, len: {}", cheese, new_used_pieces.len());
+                // panic!();
                 pieces_map = Box::new(pieces_map.clone_without(&new_used_pieces));
                 used_pieces.extend(new_used_pieces);
                 println!("total len: {}/{}", used_pieces.len(), n_pieces);
