@@ -8,6 +8,7 @@ edition = "2021"
 lto = true
 panic = "abort"
 [dependencies]
+rand = "0.8.5"
 rustc-hash = "1.1.0"
 [dependencies.uuid]
 version = "1.2.2"
