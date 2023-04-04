@@ -301,13 +301,6 @@ impl Cheese {
                 }
             })
             .filter_map(|(i, side)| {
-                /*=======
-                        let mut paths = self
-                            .get_sides()
-                            .into_iter()
-                            .enumerate()
-                            .flat_map(|(i, side)| {
-                //>>>>>>> Stashed changes*/
                 let n_pieces = pieces.get(&side)?;
                 if n_pieces == &0 {
                     return None;
@@ -320,9 +313,7 @@ impl Cheese {
         // check for possible missing pieces
         if paths.is_empty() {
             // println!("paths is empty");
-        }
-        if paths.is_empty() {
-            // paths = self.find_missing(updated_sides, &pieces); //*/
+            paths = self.find_missing(updated_sides, &pieces); //*/
         }
         let paths = if !paths.is_empty() {
             let pieces_ptr = Box::into_raw(pieces);
@@ -449,7 +440,7 @@ fn filter_multiple_paths(mut poss_paths: Vec<PossPath>) -> Vec<PossPath> {
                 if other_path.n_added > path.n_added {
                     used_paths[*idx] = i;
                 }
-                println!("merge");
+                // println!("merge");
             }
             // let arr = path.curr.get_pieces().into_iter().rev().collect::<Vec<_>>();
             // let other_arr = other_path
@@ -492,10 +483,6 @@ fn construct_cheese(start: PossPath, min_path_len: usize) -> Option<(Cheese, Pat
         };
         for (cheese, path, pieces) in poss_paths.into_iter() {
             let paths = cheese.gen_poss_paths(path, pieces);
-            // if paths.len() > 1 {
-            //     println!("split at len: {}", path.len);
-            // }
-
             new_paths.extend(paths);
         }
         if new_paths.is_empty() {
@@ -505,25 +492,19 @@ fn construct_cheese(start: PossPath, min_path_len: usize) -> Option<(Cheese, Pat
                 None
             };
         }
-
-        // let min_added = new_paths
-        //     .iter()
-        //     .fold(u32::MAX, |acc, (_, path, _)| acc.min(path.n_added));
-        // println!(
-        //     "min_added: {}, paths: {:?}",
-        //     min_added,
-        //     new_paths
-        //         .iter()
-        //         .map(|(_, p, _)| p.n_added)
-        //         .collect::<Vec<_>>()
-        // );
         poss_paths = filter_multiple_paths(new_paths);
-        // poss_paths = new_paths;
-        // .into_iter()
-        // .filter(|(_, path, _)| path.n_added == min_added)
-        // .collect();
         i += 1;
     }
+}
+fn filter_top_paths(paths: Vec<Vec<PossPath>>) -> Vec<Vec<PossPath>> {
+    println!("n_paths: {}", paths.len());
+
+    let start_piece = &paths[1][0].1.start_piece;
+    println!("first piece: {:?}", start_piece);
+    let n_added = &paths[1][0].1.n_added;
+    println!("n_added: {}", n_added);
+    // println!("last piece: {:?}", path.last().unwrap());
+    todo!()
 }
 // fn advance_paths(poss_paths: Vec<(Cheese, Path, Box<PiecesMap>)>) -> PossPaths {}
 fn construct_cheeses(pieces: Box<PiecesMap>, n_pieces: usize) -> Vec<(Cheese, Path)> {
@@ -533,29 +514,105 @@ fn construct_cheeses(pieces: Box<PiecesMap>, n_pieces: usize) -> Vec<(Cheese, Pa
     let mut results = vec![];
     let mut used_pieces = vec![];
     let mut min_path_len = n_pieces * 3 / 4;
-    while min_path_len > 2 {
+    'main_loop: while min_path_len > 2 {
         let mut found_cheese = false;
         let keys = pieces_map.base.keys().cloned().collect::<Vec<Piece>>();
-        for piece in &keys {
-            let cheese = Cheese::new([piece.0, piece.1, 0]);
-            // println!("new possible cheese: {:?}", cheese);
-            // poss_paths.extend(cheese.gen_poss_paths(pieces_map, &vec![]));
-            let start = (cheese, Path::new(piece.clone()), pieces_map.clone());
-            let result = construct_cheese(start, min_path_len);
-            if let Some((cheese, path)) = result {
-                let new_used_pieces = path.curr.get_real_pieces();
-                println!(
-                    "found cheese: {:?}, len: {}, n_added: {}",
-                    cheese, path.len, path.n_added
-                );
-                // panic!();
-                pieces_map = Box::new(pieces_map.clone_without(&new_used_pieces));
-                used_pieces.extend(new_used_pieces);
-                println!("total len: {}/{}", path.len, n_pieces);
-                min_path_len = (n_pieces - used_pieces.len()) * 3 / 4;
-                results.push((cheese, path));
-                found_cheese = true;
+        let mut top_paths = keys
+            .iter()
+            .map(|piece| {
+                let cheese = Cheese::new([piece.0, piece.1, 0]);
+                let start = (cheese, Path::new(piece.clone()), pieces_map.clone());
+                vec![start]
+            })
+            .collect::<Vec<_>>();
+        let mut i = 0;
+        'top_loop: while !top_paths.is_empty() {
+            if i % 10000 == 0 {
+                println!("n_paths (top): {}, i: {i}", top_paths.len());
             }
+            let mut new_top_paths = vec![];
+            let n_top = top_paths.len();
+            'sub_loop: for sub_paths in top_paths {
+                if i % 10000 == 0 && i != 0 || sub_paths.len() > 4 {
+                    println!("n_paths (sub): {}", sub_paths.len());
+                }
+                // println!("new possible cheese: {:?}", cheese);
+                // poss_paths.extend(cheese.gen_poss_paths(pieces_map, &vec![]));
+                // let result = {
+                // let start = poss_paths;
+                // let mut poss_paths = vec![start];
+                // let mut i = -1;
+                // if i % 10000 == 0 && i != 0 || (poss_paths.len() > 5 && i % 100 == 0) {
+                //     println!("a, {} {}", poss_paths.len(), i);
+                // }
+                let mut new_paths = vec![];
+                let curr_result = {
+                    let (cheese, path, _) = &sub_paths[0];
+                    (cheese.clone(), path.clone())
+                };
+                for (cheese, path, pieces) in sub_paths.into_iter() {
+                    let paths = cheese.gen_poss_paths(path, pieces);
+                    new_paths.extend(paths);
+                }
+                // if new_paths.is_empty() {
+                //     return if i >= min_path_len && cheese_ok(curr_result.0, min_path_len) {
+                //         Some(curr_result)
+                //     } else {
+                //         None
+                //     };
+                // }
+                if i % 10 == 0 {
+                    //remove the paths with more added pieces
+                    let min_added = new_paths
+                        .iter()
+                        .fold(u32::MAX, |acc, (_, path, _)| acc.min(path.n_added));
+                    new_paths = new_paths
+                        .into_iter()
+                        .filter(|(_, path, _)| path.n_added <= min_added)
+                        .collect();
+                }
+                if new_paths.is_empty() {
+                    if i >= min_path_len && cheese_ok(curr_result.0, min_path_len) {
+                        let (cheese, path) = curr_result;
+                        let new_used_pieces = path.curr.get_real_pieces();
+                        println!(
+                            "found cheese: {:?}, len: {}, n_added: {}, n_top: {}",
+                            cheese, path.len, path.n_added, n_top
+                        );
+                        // panic!();
+                        pieces_map = Box::new(pieces_map.clone_without(&new_used_pieces));
+                        used_pieces.extend(new_used_pieces);
+                        println!("total len: {}/{}", path.len, n_pieces);
+                        min_path_len = (n_pieces - used_pieces.len()) * 3 / 4;
+                        results.push((cheese, path));
+                        // found_cheese = true;
+                        continue 'main_loop;
+                    }
+                } else {
+                    new_top_paths.push(filter_multiple_paths(new_paths));
+                }
+                // i += 1;
+                // };
+                // if let Some((cheese, path)) = result {
+                //     let new_used_pieces = path.curr.get_real_pieces();
+                //     println!(
+                //         "found cheese: {:?}, len: {}, n_added: {}",
+                //         cheese, path.len, path.n_added
+                //     );
+                //     // panic!();
+                //     pieces_map = Box::new(pieces_map.clone_without(&new_used_pieces));
+                //     used_pieces.extend(new_used_pieces);
+                //     println!("total len: {}/{}", path.len, n_pieces);
+                //     min_path_len = (n_pieces - used_pieces.len()) * 3 / 4;
+                //     results.push((cheese, path));
+                //     found_cheese = true;
+                // }
+            }
+            if i == 100 {
+                // new_top_paths = filter_top_paths(new_top_paths);
+            }
+            top_paths = new_top_paths;
+            i += 1;
         }
         if !found_cheese {
             min_path_len /= 2;
@@ -569,6 +626,7 @@ fn construct_cheeses(pieces: Box<PiecesMap>, n_pieces: usize) -> Vec<(Cheese, Pa
         println!("used: {:?}", used_pieces);
         panic!("error, used {} out of {}", used_pieces.len(), n_pieces);
     }
+
     // poss_paths
     // };
     // poss_paths
@@ -580,14 +638,17 @@ fn construct_cheeses(pieces: Box<PiecesMap>, n_pieces: usize) -> Vec<(Cheese, Pa
 fn eat_pieces(pieces: Vec<Piece>, rng: &mut ThreadRng, prob: f64) -> Vec<Piece> {
     let mut new_pieces = vec![];
     let mut last_eaten = false;
+    let mut n_eaten = 0;
     for (i, piece) in pieces.into_iter().enumerate() {
         if rng.gen_bool(1.0 - prob) || last_eaten {
             new_pieces.push(piece);
             last_eaten = false;
         } else {
             last_eaten = true;
+            n_eaten += 1;
         }
     }
+    println!("ate {} pieces", n_eaten);
     new_pieces
 }
 fn main() {
@@ -598,7 +659,8 @@ fn main() {
         .collect::<Vec<_>>();
     let mut rng = thread_rng();
     pieces.shuffle(&mut rng);
-    // let pieces = eat_pieces(pieces, &mut rng, 0.01);
+    println!("first pieces: {:?}", &pieces[0..pieces.len().min(10)]);
+    let pieces = eat_pieces(pieces, &mut rng, 0.00001);
     // let n_pieces = pieces.len();
     // println!("pieces: {:?}", pieces);
     let start = Instant::now();
