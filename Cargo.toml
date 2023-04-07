@@ -1,13 +1,16 @@
 [package]
 name = "kaese"
 version = "0.1.0"
+description = "Ein Programm, das Käsequader aus Scheiben wieder zusammensetzen kann."
+authors = ["Arne de Borman"]
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [profile.release]
-lto = true
-panic = "abort"
+#lto = true
+#panic = "abort"
 [dependencies]
+clap = { version = "4.2.1", features = ["derive"] }
 rand = "0.8.5"
 rustc-hash = "1.1.0"
 [dependencies.uuid]
