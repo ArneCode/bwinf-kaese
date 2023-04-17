@@ -1,4 +1,4 @@
-use crate::{path::Path, pieces_map::PiecesMap, Piece, PossPath};
+use crate::{cheese_builder::PossPath, pieces_map::PiecesMap, prev_pieces::PrevPieces};
 
 pub struct NewSide {
     //neue Seite, die an das Käsestück angefügt wird
@@ -17,8 +17,25 @@ impl NewSide {
     }
 }
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Copy)]
+pub struct Piece(pub u32, pub u32);
+impl TryFrom<Vec<&str>> for Piece {
+    type Error = std::num::ParseIntError;
+    fn try_from(value: Vec<&str>) -> Result<Self, Self::Error> {
+        assert!(value.len() == 2);
+        let width = value[0].parse()?;
+        let height = value[1].parse()?;
+        if width > height {
+            // panic!();
+            Ok(Self(width, height))
+        } else {
+            Ok(Self(height, width))
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq, Hash, Clone, Copy)]
 pub struct Cheese {
-    //a<=b<=c
+    //a>=b>=c
     pub size: [u32; 3],
 }
 
@@ -43,6 +60,8 @@ impl Cheese {
         let mut size = self.size;
         size[n] += 1;
         //sortiert die Seitenlängen, damit die Käsestücke eindeutig wiederfindbar sind
+        //wie lange das dauert ist relativ egal, da das kopieren der Käsestücke eh
+        //viel länger dauert
         size.sort_unstable_by_key(|size| std::cmp::Reverse(*size));
         Cheese { size }
     }
@@ -88,6 +107,8 @@ impl Cheese {
                 if n_pieces == &0 {
                     return None;
                 }
+                //gibt die fehlende Scheibe als NewSide zurück
+                //true gibt an, dass die Scheibe hinzugefügt ist
                 Some(NewSide::new(added_i, added, true))
             })
             .collect::<Vec<_>>()
@@ -121,29 +142,31 @@ impl Cheese {
                 if n_pieces == &0 {
                     return None;
                 }
-                updated_sides[i] = true; //markiert die Seite als vergrößert
-                                         //gibt die Seite zurück, die an den Käse angefügt werden kann
+                //markiert die Seite als vergrößert
+                updated_sides[i] = true;
+                //gibt die Seite zurück, die an den Käse angefügt werden kann
+                //false gibt an, dass die Seite nicht vergrößert wurde
                 Some(NewSide::new(i, side, false))
             })
             .collect::<Vec<_>>();
         (updated_sides, new_sides)
     }
     ///erzeugt mögliche Pfade, indem es die neuen Seiten an den Käse anfügt
-    pub fn new_sides_to_poss_path(
+    pub fn new_sides_to_path(
         &self,
-        sides: Vec<NewSide>,    //neue Seiten, die an den Käse angefügt werden
-        path: Path,             //der Pfad, der bis hierher gefolgt wurde
-        pieces: Box<PiecesMap>, //welche Scheiben noch vorhanden sind
+        new_sides: Vec<NewSide>, //neue Seiten, die an den Käse angefügt werden
+        path: PrevPieces,        //der Pfad, der bis hierher gefolgt wurde
+        pieces: Box<PiecesMap>,  //welche Scheiben noch vorhanden sind
     ) -> Vec<PossPath> {
         //wandle zuerst die überbleibenden Scheibenliste in einen Pointer um,
         //damit sie einmal weniger kopiert werden müssen (siehe Dokumentation)
         let pieces_ptr = Box::into_raw(pieces);
-        let n_side = sides.len();
-        sides
+        let n_side = new_sides.len();
+        new_sides
             .into_iter()
             .enumerate()
             .map(move |(i, new_side)| {
-                //wenn es die letzte Kopie ist die verwendet wird, verwende die Scheibenliste,
+                //wenn es die letzte neue Seite ist, verwende die Scheibenliste,
                 //ohne sie zu kopieren
                 let mut pieces = if i == n_side - 1 {
                     unsafe { Box::from_raw(pieces_ptr) }
@@ -174,7 +197,7 @@ impl Cheese {
     ///erzeugt mögliche neue Pfade
     pub fn gen_poss_paths(
         &self,
-        path: Path,
+        path: PrevPieces,
         pieces: Box<PiecesMap>,
         find_missing: bool,
     ) -> Vec<PossPath> {
@@ -186,14 +209,15 @@ impl Cheese {
             new_sides = self.find_missing(updated_sides, &pieces);
         }
         if !new_sides.is_empty() {
-            //erzeugt mögliche Pfade, indem es die neuen Seiten an den Käse anfügt
-            self.new_sides_to_poss_path(new_sides, path, pieces)
+            //erzeugt mögliche Pfade, indem es Scheiben an die Seiten des Käses anfügt
+            self.new_sides_to_path(new_sides, path, pieces)
         } else {
             vec![]
         }
     }
 }
-//erzeugt einen Käse aus einer Scheibe
+
+//Nimmt die Scheibe als Startscheibe
 //kann durch die into() Funktion genutzt werden
 impl From<Piece> for Cheese {
     fn from(value: Piece) -> Self {

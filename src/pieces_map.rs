@@ -1,7 +1,8 @@
-use crate::Piece;
 use rustc_hash::{FxHashMap, FxHasher};
 use std::{hash::BuildHasherDefault, rc::Rc};
 use uuid::Uuid;
+
+use crate::cheese::Piece;
 
 //Speichert die Käsescheiben, die noch über sind
 #[derive(Debug, Clone)]
@@ -42,14 +43,17 @@ impl PiecesMap {
             }
         }
         //gebe Informationen über die Scheiben aus
+        println!("Informationen über die Käsescheiben:");
         println!(
-            "max number of one piece: {}, n_multiple: {}, number of different pieces: {}",
+            "\tMaximale Anzahl eines einzelnen Stücks: {}\n\tMehrfache Scheiben: {}\n\tAnzahl verschiener Scheiben: {}",
             max_n,
             n_multiple,
             pieces_map.len()
         );
+        println!();
         PiecesMap::new_from_map(pieces_map)
     }
+
     //erzeugt eine neue Instanz aus einer base-HashMap
     pub fn new_from_map(map: FxHashMap<Piece, u32>) -> Self {
         let base_id = Uuid::new_v4();
